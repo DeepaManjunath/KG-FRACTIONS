@@ -1,0 +1,1870 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[4]:
+
+
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[14]:
+
+
+import dash
+from dash import html, dcc, callback, Output, Input, State
+import plotly.graph_objs as go
+import networkx as nx
+import pandas as pd
+import random
+import dask.dataframe as dd
+#from dash.exceptions import PreventUpdate
+import requests
+
+import urllib
+
+from urllib.parse import quote   
+from dash.dependencies import Input, Output, State
+    
+import json
+
+from dask.diagnostics import ProgressBar
+
+from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlencode
+
+
+
+dtypes = {
+    'MObjectiveName': 'object',
+    'MSubtopic': 'object',
+    'MTopic': 'object',
+    'Prerequisites': 'object',
+    # Add other columns here as necessary
+}
+
+
+
+
+
+
+#csv_file_path = '/home/ec2-user/kg/MFTESTO.csv'
+#csv_file_path = '/root/KG/Files/MFTESTO.csv'
+
+#modified_data_ddf = dd.read_csv(csv_file_path,dtype=dtypes,encoding='iso-8859-1')
+
+#local data
+
+modified_excel_file_path = '/Users/deepamanjunath/Documents/Data.xls'
+
+
+modified_data_df = pd.read_excel(modified_excel_file_path)
+
+csv_file_path = '/Users/deepamanjunath/Documents/Data.csv'
+modified_data_df.to_csv(csv_file_path, index=False)
+
+modified_data_ddf = dd.read_csv(csv_file_path,dtype=dtypes)
+
+
+
+
+
+
+
+
+
+learning_objectives_map = {}
+
+
+def create_modified_graph(modified_data_df):
+    # Define colors and sizes for different node types
+    
+    G = nx.DiGraph()
+    colors = {
+        'Topic': 'red',
+        'Subtopic': 'green',
+        'ObjectiveName': 'purple',
+        'LearningObjectives': 'yellow',
+        'Prerequisites': 'orange'
+    }
+    sizes = {
+        'Topic': 40,
+        'Subtopic': 30,
+        'ObjectiveName': 20,
+        'LearningObjectives': 15,
+        'Prerequisites': 10
+    }
+
+    # Initialize a directed graph
+    
+    
+    levels = ['Topic', 'Subtopic', 'ObjectiveName', 'LearningObjectives', 'Prerequisites']
+    level_mapping = {level: i for i, level in enumerate(levels)}
+
+    # Track the last seen values for hierarchical columns to fill forward
+    last_seen = {}
+
+    # Iterate over DataFrame rows
+    for index, row in modified_data_df.iterrows():
+        # Fill forward the missing values based on last seen
+        for col in ['Topic', 'Subtopic', 'ObjectiveName', 'LearningObjectives']:
+            if pd.isnull(row[col]) and col in last_seen:
+                row[col] = last_seen[col]
+            else:
+                last_seen[col] = row[col]
+
+        # Add edges for each hierarchy level
+        prev_node = None
+        for col in ['Topic', 'Subtopic', 'ObjectiveName', 'LearningObjectives', 'Prerequisites']:
+            node = row[col]
+            if pd.notnull(node):
+                if node not in G:
+                    level = level_mapping[col]
+                    G.add_node(node, color=colors[col], size=sizes[col],level=level,type=col)
+                if prev_node:
+                    G.add_edge(prev_node, node)
+                prev_node = node
+
+    return G
+
+
+
+
+
+
+
+G = create_modified_graph(modified_data_ddf)
+#G = create_modified_graph(modified_data_df)
+
+pos = nx.multipartite_layout(G, subset_key='level')
+
+
+
+
+
+
+
+# Returning the nodes and edges from the graph to check if it's created properly
+#list(G.nodes(data=True)), list(G.edges())
+
+
+
+
+
+   
+# Example usage:
+# data_df = pd.read_excel('/path
+
+
+
+
+
+
+
+
+
+
+#G = create_modified_graph(modified_data_df)
+#pos = nx.spring_layout(G, k=0.15, iterations=50, seed=42)
+#pos = {node: (random.uniform(0, 1), random.uniform(0, 1)) for node in G.nodes}
+
+
+
+
+
+
+#pos = nx.spring_layout(G, seed=42)
+
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
+
+
+#app = dash.Dash(__name__)
+server = app.server
+
+
+def create_side_panel():
+    return html.Div([
+       # html.Button("Start", id='start-button', n_clicks=0),
+        #html.Button('Start', id='start-button', style={'fontSize': '20px', 'padding': '10px'}),
+       
+        html.Div(id='dropdown-container', style={'display': 'none'}, children=[
+           # html.Button('Refresh', id='reset-button', style={'fontSize': '20px', 'padding': '10px'}),
+            #html.Button("REFRESH BUTTON", id='reset-button', n_clicks=0),
+            html.H4("Nodes"),
+            html.Div("Topic dropdown here",id='topic-dropdown-container'),
+           
+            html.Div(id='subtopic-dropdown-container'),
+            html.Div(id='objective-dropdown-container'),
+            html.Div(id='learning-objective-dropdown-container'),
+            html.Div(id='Prerequisites-dropdown-container', children=dcc.Dropdown(
+                id='Prerequisites-dropdown',
+                options=[],
+                value=None,
+                placeholder="Select Prerequisites",
+                style={'width': '400%', 'whiteSpace': 'normal'}
+            )),
+        ]),
+    ], style={'width': '30%', 'display': 'inline-block', 'verticalAlign': 'top'})
+
+
+
+
+
+def create_info_table():
+    return html.Table([
+        html.Tr([html.Td("Prerequisites"), html.Td(id='prerequisites-cell')]),
+        html.Tr([html.Td("ObjectiveName"), html.Td(id='objective-name-cell')]),
+        html.Tr([html.Td("Subtopic"), html.Td(id='subtopic-cell')]),
+        html.Tr([html.Td("Topic"), html.Td(id='topic-cell')])
+        
+    ], style={'width': '100%', 'border-collapse': 'collapse', 'border': '1px solid black'})
+
+
+# ... [Your existing code to prepare the Plotly figure] ...
+
+edge_trace = go.Scattergl(x=[], y=[], line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines')
+default_size = 20
+default_color='grey'
+node_x, node_y, node_size, node_color = [], [], [], []
+for node in G.nodes(data=True):
+   
+    x, y = pos[node[0]]
+    
+    node_x.append(x)
+    node_y.append(y)
+    node_size.append(node[1].get('size', default_size))
+    node_color.append(node[1].get('color', default_color)) 
+   
+   
+
+node_trace = go.Scattergl(
+    x=node_x, y=node_y, text=list(G.nodes()), mode='markers', hoverinfo='text',
+    marker=dict(showscale=False, size=node_size, color=node_color, line_width=2),name='TOGGLE BUTTON')
+
+
+
+
+fig = go.Figure(data=[edge_trace, node_trace],
+                layout=go.Layout(
+                    title={
+                        'text': '<br>Knowledge Graph of Fractions',
+                        'y': 1,  # Adjust the y position if needed
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'yanchor': 'top'
+                    },
+                    paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                    plot_bgcolor='#D3D3D3' ,
+                   
+                    showlegend=True,
+                    hovermode='closest',
+                    margin=dict(b=20, l=5, r=5, t=5),
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, fixedrange=False),  # Allow zooming and panning
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, fixedrange=False),  # Allow zooming and panning
+                    height=500
+                ))
+
+
+
+
+# Function to add node traces
+def add_node_trace(node_type, node_label, color, size1):
+    x, y = [], []
+    #print("size",size1)
+    for node in G.nodes(data=True):
+        if node[1].get('level', 'default_level') == node_type:
+        
+            x_, y_ = pos[node[0]]
+            x.append(x_)
+            y.append(y_)
+    
+    fig.add_trace(go.Scattergl(
+        x=x, y=y,
+        mode='markers',
+        
+        marker=dict(size=size1, color=color),
+        name=node_label,
+        text=[n for n, attr in G.nodes(data=True) if attr.get('level', 'default_level') == node_type], 
+        hoverinfo='text'
+    ))
+
+# Adding different node type traces for legend
+add_node_trace('head', 'Topic Head', 'red', 40)
+add_node_trace('subtopic', 'Subtopic', 'green', 30)
+add_node_trace('objective', 'Objective', 'purple', 20)
+add_node_trace('learning_objective', 'Learning Outcomes', 'yellow', 10)
+#add_node_trace('prerequisites','Prerequisites','orange',10)
+#add_node_trace('MObjectivename','MObjectiveName','Red',10)
+
+
+
+# Edge trace
+edge_x, edge_y = [], []
+for edge in G.edges():
+    x0, y0 = pos[edge[0]]
+    x1, y1 = pos[edge[1]]
+    edge_x.extend([x0, x1, None])
+    edge_y.extend([y0, y1, None])
+fig.add_trace(go.Scatter(
+    x=edge_x, y=edge_y,
+    line=dict(width=0.5, color='#888'),
+    hoverinfo='none',
+    mode='lines',
+    showlegend=False,
+    
+))
+
+# Static annotations for the first legend
+static_legend_labels = ['Topic', 'Subtopic', 'ObjectiveName', 'LearningOutcomes','Prerequisites','MirrorObjectiveName','MirrorSubtopic','MirorTopic']
+circle_colors = ['red', 'green', 'purple', 'yellow','#FFCC80','#B266B2','#66C266','#FF6666']
+circle_sizes = ['40px', '30px', '30px', '30px','30px','30px','30px','30px']
+
+
+static_annotations = [
+        
+        dict(
+            x=0.01, y=0.1-(0.03*i) + 0.09,  #
+           # x=0.01, y=0.1-(0.03*i),
+           
+            xref="paper", yref="paper",
+            text=f"<span style='color: {circle_colors[i]}; font-size: {circle_sizes[i]};'>●</span> {static_legend_labels[i]}",
+            showarrow=False,
+            align="left",
+            font=dict(size=12, color='blue',family='Arial')
+        ) for i in range(len(static_legend_labels))
+       
+]
+# Static annotations for graph interaction states reordered
+state_labels = ['Zoom', 'Pan', 'Zoom In', 'Zoom Out']  # Reordered labels
+state_symbols = ['🔎', '↔️↕️', '🔍+', '🔍-']  # Corresponding symbols reordered
+
+
+
+
+
+
+state_annotations = [
+        dict(
+            x=1,  # Adjust for bottom right
+            y=0.01 + (0.03 * i),
+             # Adjust position accordingly
+            xref="paper", yref="paper",
+            text=f"{state_symbols[i]} {state_labels[i]};<span style='color: #ff0000;'>'",
+            #text=f"{state_symbols[i]} {state_labels[i]}",  # Combine symbol and label
+            showarrow=False,
+            align="right",
+            font=dict(size=12, color='blue',family='Arial')
+        ) for i in range(len(state_labels))
+]
+ 
+
+ 
+
+# Prepare the Plotly figure with the updated annotations
+fig = go.Figure(data=[edge_trace,node_trace],
+                layout=go.Layout(
+                    title={
+                        'text': '<br>Knowledge Graph of Fractions',
+                        'y': 0.9,  # Adjust the y position if needed
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'yanchor': 'top'
+                    },
+                    paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                    plot_bgcolor='#D3D3D3' , 
+                    showlegend=False,
+                    hovermode='closest',
+                    margin=dict(b=20, l=5, r=5, t=5),
+                    #margin=dict(l=100, r=20, t=50, b=50),
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    height=500,
+                    annotations=state_annotations+static_annotations
+                ))
+
+
+fig.update_layout(
+    title={
+                        'text': '<br>Knowledge Graph of Fractions',
+                        'y': 1,  # Adjust the y position if needed
+                        'x': 0.5,
+                        'xanchor': 'center',
+                        'yanchor': 'top'
+                    },
+     
+    paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+    plot_bgcolor='#D3D3D3' ,
+  
+    showlegend=True,
+    hovermode='closest',
+    margin=dict(b=20, l=5, r=5, t=5),
+    #margin=dict(l=100, r=20, t=50, b=50),
+    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+    height=500,
+    legend=dict(
+        x=0.6,  # Position on the x-axis (0 is extreme left)
+        y=0.001,  
+        xanchor='right',
+        yanchor='top',
+       # paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+       # plot_bgcolor='#D3D3D3' , 
+        font=dict(family='sans-serif', size=10, color='black'),
+        bgcolor='LightSteelBlue',
+        bordercolor='Black',
+        borderwidth=2,
+       # itemheight=0.75,  # Adjust space between legend items
+        tracegroupgap=2,  
+        itemwidth=30
+    )
+)
+
+
+
+
+app.layout = html.Div([
+    
+    #html.Button("New Start", id="new-start-button"),
+    dcc.Location(id='url', refresh=False),
+    dcc.Graph(id='knowledge-graph', figure=fig, style={'display': 'inline-block', 'width': '100%'}),
+    
+   # dcc.Location(id='url', refresh=False),
+    html.Div([
+        #create_side_panel(),
+        html.Div(id='info-table-container'),  # Container for the info table
+        #dcc.Interval(id='interval-component', interval=1*1000, n_intervals=0, max_intervals=1),
+        dcc.Store(id='filtered-topics-store', storage_type='memory'),
+
+        dcc.Store(id='store-clicked-node', storage_type='session'),
+        dcc.Store(id='selected-topic-store'),
+        dcc.Store(id='selected-subtopic-store'),
+        dcc.Store(id='selected-objective-store'),
+        dcc.Store(id='selected-learning-objective-store'),
+        dcc.Store(id='selected-Prerequisites-store'),
+   
+    # Graph Component
+     # Placeholder link
+    
+    ], style={'width': '20%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+    #html.A(id='main-link', children="Main Graph View", href="", target="_blank"),
+    html.A(id='return-link', children="Random View", href="")
+
+])
+    
+
+
+
+
+
+
+# Example usage:
+#target_node = 'YourNode'  # Replace with the actual node you are interested in
+#next_level_children = get_next_level_children(G, target_node)
+
+def get_next_level_unique_neighbors(graph, node):
+    global excluded_nodes  # Declare the global variable inside the function
+
+    neighbors = list(graph.neighbors(node))
+    next_level_neighbors = {neighbor for neighbor in neighbors for child in graph.neighbors(neighbor)}
+
+    # Exclude nodes from the next_level_neighbors list
+    next_level_neighbors = [neighbor for neighbor in next_level_neighbors if neighbor not in excluded_nodes]
+
+    return next_level_neighbors
+
+
+
+
+# Example usage:
+#target_node = 'YourNode'  # Replace with the actual node you are interested in
+#excluded_nodes = ['Node1', 'Node2', 'Node3']  # Replace with the nodes you want to exclude
+#next_level_unique_neighbors = get_next_level_unique_neighbors(G, target_node, excluded_nodes)
+
+
+# Example usage:
+#target_node = 'YourNode'  # Replace with the actual node you are interested in
+#next_level_unique_neighbors = get_next_level_unique_neighbors(G, target_node)
+
+#print(f"Next Level Unique Neighbors of {target_node}: {next_level_unique_neighbors}")
+
+
+excluded_nodes = []
+# Placeholder variables, replace these with your actual data
+all_topics=[]
+all_subtopics = []  # Replace with your actual subtopics list
+all_objectives = []  # Replace with your actual objectives list
+all_learning_objectives = []  # Replace with your actual learning objectives list
+all_prerequisites = []  # Replace with your actual prerequisites list
+
+# Function to get ancestors of a given node in the graph
+def get_ancestors(node, graph):
+    ancestors = set()
+    for edge in nx.edge_dfs(graph, source=node):
+        ancestors.add(edge[0])
+    return ancestors
+
+
+#@app.callback(
+ #   Output('filtered-topics-store', 'data'),
+  #  [Input('interval-component', 'n_intervals')]
+#)
+#def update_filtered_topics(_):
+    # Logic to determine filtered topics
+ #   filtered_topics = modified_data_df[modified_data_df['Prerequisites'].notna()]['Topic'].unique()
+    
+    #filtered_topics = modified_data_df[modified_data_df['Prerequisites'].notna()]['Topic'].unique().tolist()
+  #  return filtered_topics
+
+@app.callback(
+    Output('filtered-topics-store', 'data'),
+    [Input('interval-component', 'n_intervals')]
+)
+def update_filtered_topics(_):
+    # Logic to determine filtered topics
+    filtered_topics_dd = modified_data_ddf[modified_data_ddf['Prerequisites'].notnull()]['Topic'].drop_duplicates()
+
+    # Compute the result and get unique values
+    filtered_topics = filtered_topics_dd.compute().unique()
+
+    # Filter out None and NaN values
+    filtered_topics_list = [topic for topic in filtered_topics if not pd.isna(topic)]
+
+    # Debug print
+    #print("Filtered topics after None and NaN removal:", filtered_topics_list)
+
+    return filtered_topics_list
+
+@app.callback(
+    Output('dropdown-container', 'style'),
+    [Input('start-button', 'n_clicks')]
+)
+def toggle_dropdowns(n_clicks):
+    if n_clicks and n_clicks > 0:
+        return {'display': 'block'}
+    return {'display': 'none'}
+
+@app.callback(
+    Output('topic-dropdown-container', 'children'),
+    [Input('filtered-topics-store', 'data')]
+    
+)
+def update_topic_dropdown(filtered_topics):
+    if filtered_topics:
+        
+    # Create and return the topic dropdown with filtered topics
+        return dcc.Dropdown(
+            id='topic-dropdown',
+            options=[{'label': topic, 'value': topic} for topic in filtered_topics],
+            value=None,
+            placeholder="Select a Topic",
+            style={'width': '400%', 'whiteSpace': 'normal'}
+            
+        
+        )
+    return ''
+
+@app.callback(
+    Output('selected-topic-store', 'data'),
+    Input('topic-dropdown', 'value')
+)
+def store_selected_topic(selected_topic):
+    return {'topic': selected_topic}
+@app.callback(
+    Output('subtopic-dropdown-container', 'children'),
+    [Input('selected-topic-store', 'data')]
+)   
+def update_subtopic_dropdown(stored_data):
+    
+    
+    ctx = dash.callback_context
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
+    selected_topic = stored_data.get('topic') if stored_data else None
+    
+    #print("trigger_id_subtopic dropdown",trigger_id)
+
+    
+    if selected_topic:
+            children_subtopics = list(G.successors(selected_topic))
+            return dcc.Dropdown(
+                id='subtopic-dropdown',
+                options=[{'label': st, 'value': st} for st in children_subtopics],
+                value=None,
+                placeholder="Select a Subtopic",
+                style={'width': '400%', 'whiteSpace': 'normal'}
+            )
+    return ''
+
+@app.callback(
+    Output('selected-subtopic-store', 'data'),
+    Input('subtopic-dropdown', 'value')
+)
+def store_selected_subtopic(selected_subtopic):
+    return {'subtopic': selected_subtopic}
+
+@app.callback(
+    Output('objective-dropdown-container', 'children'),
+    [Input('selected-subtopic-store', 'data')]
+)
+def update_objective_dropdown(stored_subtopic_data):
+    global excluded_nodes
+    selected_subtopic = stored_subtopic_data.get('subtopic') if stored_subtopic_data else None
+    
+    if selected_subtopic:
+        # Use G.successors to get the children (Objectives) of the selected subtopic
+        
+        
+        
+        
+        #next_level_unique_neighbors = get_next_level_children(G, selected_subtopic)
+        #next_level_unique_neighbors = get_next_level_unique_neighbors(G, selected_subtopic, excluded_nodes)
+
+        
+        next_level_unique_neighbors = get_next_level_unique_neighbors(G, selected_subtopic)
+        
+        if next_level_unique_neighbors is not None:
+            next_level_unique_neighbors = [neighbor for neighbor in next_level_unique_neighbors if neighbor not in excluded_nodes]
+        else:
+            next_level_neighbors = []
+      
+        excluded_nodes.append(next_level_unique_neighbors)
+        #next_level_unique_neighbors = [node for node in next_level_unique_neighbors if node not in excluded_nodes]
+
+        #print("next_level_children",next_level_unique_neighbors)
+        #children_objectives = list(G.successors(selected_subtopic))
+        #excluded_nodes = get_ancestors(selected_subtopic, G)
+        #print("Childdren_objectives",children_objectives)
+       
+
+        return dcc.Dropdown(
+            id='objective-dropdown',
+            options=[{'label': obj, 'value': obj} for obj in next_level_unique_neighbors],
+            value=None,
+            placeholder="Select an Objective",
+            style={'width': '400%', 'whiteSpace': 'normal'}
+        )
+    return ''
+
+
+@app.callback(
+    Output('selected-objective-store', 'data'),
+    Input('objective-dropdown', 'value')
+)
+def store_selected_objective(selected_objective):
+    return {'objective': selected_objective}
+
+
+
+
+@app.callback(
+    Output('learning-objective-dropdown-container', 'children'),
+    [Input('selected-objective-store', 'data')]
+)
+def update_learning_objective_dropdown(stored_objective_data):
+    
+    #print("stored_objective_data",stored_objective_data)
+    global excluded_nodes
+    selected_objective = stored_objective_data.get('objective') if stored_objective_data else None
+    
+    if selected_objective:
+        # Use G.successors to get the children (Objectives) of the selected subtopic
+        
+        
+        
+        
+        #next_level_unique_neighbors = get_next_level_children(G, selected_subtopic)
+        #next_level_unique_neighbors = get_next_level_unique_neighbors(G, selected_subtopic, excluded_nodes)
+
+        
+        next_level_unique_neighbors = get_next_level_unique_neighbors(G, selected_objective)
+        
+        if next_level_unique_neighbors is not None:
+            next_level_unique_neighbors = [neighbor for neighbor in next_level_unique_neighbors if neighbor not in excluded_nodes]
+        else:
+            next_level_neighbors = []
+      
+        excluded_nodes.append(next_level_unique_neighbors)
+        #next_level_unique_neighbors = [node for node in next_level_unique_neighbors if node not in excluded_nodes]
+
+        #print("next_level_children",next_level_unique_neighbors)
+        #children_objectives = list(G.successors(selected_subtopic))
+        #excluded_nodes = get_ancestors(selected_subtopic, G)
+        #print("Childdren_objectives",children_objectives)
+       
+
+        return dcc.Dropdown(
+            id='learning-objective-dropdown',
+            options=[{'label': obj, 'value': obj} for obj in next_level_unique_neighbors],
+            value=None,
+            placeholder="Select a Learning Outcome",
+            style={'width': '400%', 'whiteSpace': 'normal'}
+        )
+    return ''
+
+
+@app.callback(
+    Output('selected-learning-objective-store', 'data'),
+    Input('learning-objective-dropdown', 'value')
+)
+def store_selected_learning_objective(selected_learning_objective):
+    return {'learning_objective': selected_learning_objective}
+
+
+@app.callback(
+    Output('Prerequisites-dropdown-container', 'children'),
+    [Input('selected-learning-objective-store', 'data')]
+)
+def update_Prerequisites_dropdown(stored_learning_objective_data):
+   
+    global excluded_nodes
+    selected_learning_objective = stored_learning_objective_data.get('learning_objective') if stored_learning_objective_data else None
+    
+    #print("selected_learning_objective",selected_learning_objective)
+    
+    if selected_learning_objective and selected_learning_objective in G:
+        children_LO = list(G.successors(selected_learning_objective))
+        # Check if there are prerequisites for the selected learning objective
+        if children_LO:
+            return dcc.Dropdown(
+                id='Prerequisites-dropdown',
+                options=[{'label': prerequisite, 'value': prerequisite} for prerequisite in children_LO],
+                value=None,
+                placeholder="Select Prerequisites",
+                style={'width': '400%', 'whiteSpace': 'normal'}
+            )
+   
+    return ''
+
+
+@app.callback(
+    Output('selected-Prerequisites-store', 'data'),
+    Input('Prerequisites-dropdown', 'value')
+)
+def store_selected_Prerequisites(selected_Prerequisites):
+    return {'Prerequisites': selected_Prerequisites}
+
+
+
+
+@app.callback(
+    Output('info-table-container', 'children'),
+    [Input('selected-Prerequisites-store', 'data')],
+    
+)
+def display_info_table(stored_Prerequisites_data):
+    selected_prerequisite = stored_Prerequisites_data.get('Prerequisites') if stored_Prerequisites_data else None
+    
+    if not selected_prerequisite:
+        # If no prerequisite is selected, do not display the table
+        return None
+
+    # If a prerequisite is selected, find the relevant information
+    row = modified_data_df[modified_data_df['Prerequisites'] == selected_prerequisite].iloc[0]
+    table_content = [
+        html.Tr([html.Td("Prerequisites"), html.Td(row['Prerequisites'])]),
+        html.Tr([html.Td("ObjectiveName"), html.Td(row['MObjectiveName'])]),
+        html.Tr([html.Td("Subtopic"), html.Td(row['MSubtopic'])]),
+        html.Tr([html.Td("Topic"), html.Td(row['MTopic'])])
+    ]
+    return html.Table(table_content, style={'width': '100%', 'border-collapse': 'collapse', 'border': '1px solid black'})
+
+
+
+
+
+
+# ... [Your existing code]
+
+# ... [Your existing code]
+
+#filtered_topics = modified_data_df[modified_data_df['Prerequisites'].notna()]['Topic'].unique()     
+
+
+
+
+
+
+
+# Assuming you have already imported other necessary libraries and defined the app
+
+
+    
+       
+
+
+
+# Add callback functions and other necessary parts of your app...
+
+# ... [Your existing code]
+
+
+
+# Placeholder variables, replace these with your actual data
+
+
+
+
+
+
+
+
+
+
+# Remember to add the 'dynamic-link' ID to your hyperlink in the layout
+# html.A(id='dynamic-link', children="Multipartite View", href="", target="_blank")
+
+
+
+
+
+   
+
+   
+
+
+ 
+
+# ... [Your existing code]
+
+#filtered_topics = modified_data_df[modified_data_df['Prerequisites'].notna()]['Topic'].unique()     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Update for 'Subtopic' dropdown
+
+# Update for 'Subtopic' dropdown
+
+# Update for 'ObjectiveName' dropdown
+
+
+# Update for 'LearningObjectives' dropdown
+
+# Update for 'Prerequisites' dropdown
+
+
+
+
+    
+
+
+
+
+
+
+
+
+# Callbacks for Dropdown Updates
+# ... [Your existing dropdown callbacks] ...
+
+# Callback to Display Reset Button
+
+
+@app.callback(
+    Output('topic-dropdown', 'value'),
+    [Input('reset-button', 'n_clicks')]
+)
+def reset_topic_dropdown(n_clicks):
+    return None if n_clicks and n_clicks > 0 else dash.no_update
+
+@app.callback(
+    Output('subtopic-dropdown', 'value'),
+    [Input('reset-button', 'n_clicks')]
+)
+def reset_subtopic_dropdown(n_clicks):
+    return None if n_clicks and n_clicks > 0 else dash.no_update
+
+@app.callback(
+    Output('objective-dropdown', 'value'),
+    [Input('reset-button', 'n_clicks')]
+)
+def reset_objective_dropdown(n_clicks):
+    return None if n_clicks and n_clicks > 0 else dash.no_update
+
+@app.callback(
+    Output('learning-objective-dropdown', 'value'),
+    [Input('reset-button', 'n_clicks')]
+)
+def reset_learning_objective_dropdown(n_clicks):
+    return None if n_clicks and n_clicks > 0 else dash.no_update
+
+@app.callback(
+    Output('Prerequisites-dropdown', 'value'),
+    [Input('reset-button', 'n_clicks')]
+)
+def reset_prerequisites_dropdown(n_clicks):
+    return None if n_clicks and n_clicks > 0 else dash.no_update
+
+
+#@app.callback(
+  #  Output('return-link', 'href'),
+ #   [Input('url', 'href')]
+#)
+#def generate_return_link(href):
+    # Parse the current URL to extract the query parameters
+    #parsed_url = urlparse(href)
+    #params = parse_qs(parsed_url.query)
+    
+    # Extract the parameters
+    #selected_topic = params.get('topic', [None])[0]
+    #selected_subtopic = params.get('subtopic', [None])[0]
+    #selected_objective = params.get('objective', [None])[0]
+    #selected_learning_objective = params.get('learning_objective', [None])[0]
+    #selected_Prerequisites = params.get('prerequisites', [None])[0]
+
+    # Reconstruct the URL for server 3343
+    #return_url_params = {
+       # 'topic': selected_topic,
+       # 'subtopic': selected_subtopic,
+      #  'objective': selected_objective,
+     #   'learning_objective': selected_learning_objective,
+    #    'prerequisites': selected_Prerequisites
+   # }
+
+    # Encode the parameters to be URL-friendly
+    #encoded_params = urlencode(return_url_params)
+
+    # Construct the full URL to server 3343
+    
+    
+    #return_url = f"http://51.20.34.164:8097/?{encoded_params}"
+
+    # Return the constructed URL or a fallback URL
+    #return return_url if return_url else "#"
+
+
+@app.callback(
+    Output('return-link', 'href'),
+    [Input('url', 'href')]
+)
+def generate_return_link(href):
+    # Parse the current URL to extract the query parameters
+    parsed_url = urlparse(href)
+    params = parse_qs(parsed_url.query)
+    
+    # Extract the parameters
+    selected_topic = params.get('topic', [None])[0]
+    selected_subtopic = params.get('subtopic', [None])[0]
+    selected_objective = params.get('objective', [None])[0]
+    selected_learning_objective = params.get('learning_objective', [None])[0]
+    selected_Prerequisites = params.get('prerequisites', [None])[0]
+    
+    print("Selected_topic",selected_topic)
+    print("selected_subtopic",selected_subtopic)
+    # Reconstruct the URL for server 3343
+    return_url_params = {
+        'topic': selected_topic,
+        'subtopic': selected_subtopic,
+        'objective': selected_objective,
+        'learning_objective': selected_learning_objective,
+        'prerequisites': selected_Prerequisites
+    }
+
+    # Encode the parameters to be URL-friendly
+    encoded_params = urlencode(return_url_params)
+
+    # Construct the full URL to server 3343
+    print("encoded_parms",encoded_params)
+    
+    return_url = f"http://16.170.230.114:8097/?{encoded_params}"
+
+    # Return the constructed URL or a fallback URL
+    return return_url if return_url else "#"
+
+
+
+
+
+
+# Similar changes for 'update_objective_dropdown' and 'update_learning_objective_dropdown'
+# ...
+
+
+
+
+
+
+
+
+# Modify the callback for updating subtopic dropdown
+
+
+
+
+
+# Function to get path edges
+def get_path_edges(selected_topic, selected_subtopic, selected_objective, selected_learning_objective):
+    edges = []
+    if selected_topic:
+        if selected_subtopic:
+            edges.append((selected_topic, selected_subtopic))
+            if selected_objective:
+                edges.append((selected_subtopic, selected_objective))
+                if selected_learning_objective:
+                    lo_node = learning_objectives_map.get(selected_learning_objective)
+                    if lo_node:
+                        edges.append((selected_objective, lo_node))
+    return edges
+
+# Callback for updating graph based on dropdown selections and click events
+
+# Callback for updating graph based on dropdown selections and click events
+
+
+# Callback for updating graph based on dropdown selections and click events
+
+
+
+def safe_divide(numerator, denominator, default_value=0):
+    if denominator == 0 or abs(denominator) < 1e-10:  # 1e-10 is a threshold for "very close to zero"
+        return default_value
+    return numerator / denominator
+
+def get_zoom_bounds(selected_nodes, pos, scale=0.5):
+    if not selected_nodes or not pos:
+        return None, None
+
+    # Extract positions of selected nodes
+    x_values, y_values = zip(*[pos[node] for node in selected_nodes if node in pos])
+    min_x, max_x = min(x_values), max(x_values)
+    min_y, max_y = min(y_values), max(y_values)
+
+    # Calculate center points using safe_divide
+    center_x = safe_divide(min_x + max_x, 2)
+    center_y = safe_divide(min_y + max_y, 2)
+
+    # Calculate ranges with a smaller scale
+    range_x = safe_divide(max_x - min_x, 1 / scale)
+    range_y = safe_divide(max_y - min_y, 1 / scale)
+
+    # Calculate final bounds
+    return [center_x - range_x / 2, center_x + range_x / 2], \
+           [center_y - range_y / 2, center_y + range_y / 2]
+
+# Usage example of get_zoom_bounds
+# x_range, y_range = get_zoom_bounds(selected_nodes, pos, GRAPH_WIDTH, GRAPH_HEIGHT, scale=9.5)
+
+
+# Modify the update_graph function
+# Modify the update_graph function
+
+
+# ... [Your existing code]
+
+# Define your color schemes outside of the function for better performance
+
+
+colors_selected = {
+    'Topic': '#C00000',  # Darker red
+    'Subtopic': '#006400',  # Darker green
+    'ObjectiveName': '#500050',  # Darker purple
+    'LearningObjectives': '#CCCC00',  # Darker yellow
+    'Prerequisites': '#CC8400'  # Darker orange
+}
+
+colors_unselected = {
+    'Topic': '#FF6666',  # Lighter red
+    'Subtopic': '#66C266',  # Lighter green
+    'ObjectiveName': '#B266B2',  # Lighter purple
+    'LearningObjectives': '#FFFF99',  # Lighter yellow
+    'Prerequisites': '#FFCC80'  # Lighter orange
+}
+
+
+
+
+# Function to determine the color of a node
+def get_node_color(node, selected_nodes):
+    node_type = G.nodes[node].get('type')  # Assuming each node has a 'type' attribute
+    if node in selected_nodes:
+        return colors_selected.get(node_type, 'grey')
+    else:
+        return colors_unselected.get(node_type, 'grey')
+
+
+last_clicked_node = None
+
+saved_selected_topic=None
+saved_selected_subtopic=None
+saved_selected_objective=None
+saved_selected_learning_objective=None
+saved_selected_Prerequisites=None
+
+
+@app.callback(
+    Output('knowledge-graph', 'figure'),
+    [
+     Input('url', 'href'),
+     
+     
+     Input('knowledge-graph', 'clickData'),
+     Input('selected-topic-store', 'data'),
+     Input('selected-subtopic-store', 'data'),
+     Input('selected-objective-store', 'data'),
+     Input('selected-learning-objective-store', 'data'),
+     Input('selected-Prerequisites-store', 'data'),
+    
+     
+    
+     
+    
+     ],
+    [State('knowledge-graph', 'figure')]
+)
+def update_graph(href,clickData,stored_data, stored_subtopic_data,stored_objective_data,stored_learning_objective_data,stored_Prerequisites_data,  current_figure):
+    
+    #print("href",href)
+    global last_clicked_node
+    global saved_selected_topic
+    global saved_selected_subtopic
+    global saved_selected_objective
+    global saved_selected_learning_objective
+    global saved_selected_Prerequisites
+
+    #print("selected_topic-update graph",selected_topic)
+    #print("selected_subtopic-update",selected_subtopic)
+    #print("last_clicked_node",last_clicked_node)
+   
+    ctx = dash.callback_context
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
+    fig = go.Figure(data=current_figure['data'], layout=current_figure['layout'])
+    
+       
+    if href!="http://16.170.230.114:8098/":
+        parsed_url = urllib.parse.urlparse(href)
+        params = urllib.parse.parse_qs(parsed_url.query)
+
+    # Extract parameters
+        selected_topic = params.get('topic', [None])[0]
+        selected_subtopic = params.get('subtopic', [None])[0]
+        selected_objective = params.get('objective', [None])[0]
+        selected_learning_objective = params.get('learning_objective', [None])[0]
+        selected_Prerequisites = params.get('prerequisites', [None])[0]
+        
+        saved_selected_topic=selected_topic
+        saved_selected_subtopic=selected_subtopic
+        saved_selected_objective=selected_objective
+        saved_selected_learning_objective=selected_learning_objective
+        saved_selected_Prerequisites=selected_Prerequisites
+
+        
+        #print("selected_topi",selected_topic)
+        #print("selected_subtopic",selected_subtopic)
+        #print("selected_objective",selected_objective)
+        #print("selected_learning_objective",selected_learning_objective)
+        #print("selected_Prerequisites",selected_Prerequisites)
+        
+        
+        #print("saved_selected_topic-------",saved_selected_topic)
+        
+        selected_nodes1 = [selected_topic, selected_subtopic, selected_objective, selected_learning_objective, selected_Prerequisites]
+           
+
+    # Remove None values from the list
+        selected_nodes1 = [node for node in selected_nodes1 if node is not None]
+        
+        
+
+    else:
+   
+       
+        selected_topic = stored_data.get('topic') if stored_data else None
+        selected_subtopic = stored_subtopic_data.get('subtopic') if stored_subtopic_data else None
+        selected_objective = stored_objective_data.get('objective') if stored_objective_data else None
+        selected_learning_objective = stored_learning_objective_data.get('learning_objective') if stored_learning_objective_data else None
+        selected_Prerequisites = stored_Prerequisites_data.get('Prerequisites') if stored_Prerequisites_data else None
+    
+    
+    
+    # Define selected nodes based on dropdown selections
+        selected_nodes1 = [
+            stored_data.get('topic') if stored_data else None,
+            stored_subtopic_data.get('subtopic') if stored_subtopic_data else None,
+            stored_objective_data.get('objective') if stored_objective_data else None,
+            stored_learning_objective_data.get('learning_objective') if stored_learning_objective_data else None,
+            stored_Prerequisites_data.get('Prerequisites') if stored_Prerequisites_data else None,
+        ]
+
+    # Remove None values from the list
+        selected_nodes1 = [node for node in selected_nodes1 if node is not None]
+
+    #if v_clicks is None:
+     #   raise PreventUpdate
+
+    # Create a new graph layout
+   
+        
+        
+   
+
+
+    
+         
+      
+    
+
+    #print("selected_subtopic",selected_subtopic)
+    #print("trigger_id",trigger_id)
+   
+    
+
+   
+   
+    if trigger_id == 'knowledge-graph' and clickData:
+        clicked_node = clickData['points'][0]['text']
+
+        # Reset the graph if the same node is clicked again
+        if clicked_node == last_clicked_node:
+            last_clicked_node = None
+            return go.Figure(data=[edge_trace, node_trace], layout=current_figure['layout'])
+
+        # Update the graph based on the clicked node
+        fig = go.Figure(data=[edge_trace, node_trace], layout=current_figure['layout'])
+
+        # Logic for handling click on a node
+        
+        predecessors = list(G.predecessors(clicked_node))
+        successors = list(G.successors(clicked_node))
+        connected_nodes = predecessors + successors
+        connected_edges = [(u, v) for u, v in G.edges() if u == clicked_node or v == clicked_node]
+
+        #connected_nodes = list(G.predecessors(clicked_node)) + list(G.successors(clicked_node))
+        #connected_edges = [(u, v) for u, v in G.edges() if u == clicked_node or v == clicked_node]
+
+    
+        #connected_nodes = list(G.neighbors(clicked_node))
+        #connected_edges = [(u, v) for u, v in G.edges() if u == clicked_node or v == clicked_node]
+
+        if clicked_node in pos:
+            selected_nodes = [clicked_node]
+            x_range, y_range = get_zoom_bounds(selected_nodes, pos, scale=0.5)
+
+            # Update layout to zoom in on the clicked node
+            fig.update_layout(
+                paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                plot_bgcolor='#D3D3D3' , 
+                xaxis=dict(range=x_range, autorange=True),
+                yaxis=dict(range=y_range, autorange=True)
+            )
+        
+        # Highlight the clicked node itself
+        clicked_node_x, clicked_node_y = pos[clicked_node]
+        fig.add_trace(go.Scattergl(
+            x=[clicked_node_x], y=[clicked_node_y],
+            mode='markers+text',
+            marker=dict(size=30, color='orange', line=dict(width=2)),
+            name=clicked_node,
+            text=[clicked_node],
+            hoverinfo='text'
+        ))
+        # Highlight connected nodes
+        for node in connected_nodes:
+            #print("node",node)
+            fig.add_trace(go.Scattergl(
+                x=[pos[node][0]],
+                y=[pos[node][1]],
+                text=[node],
+                mode='markers+text',
+                textposition='bottom center',
+                hoverinfo='text',
+                marker=dict(
+                    size=15,
+                    color='lightblue',
+                    line=dict(width=2)
+                ),
+                showlegend=False
+            ))
+
+        # Highlight connected edges
+        for edge in connected_edges:
+            x0, y0 = pos[edge[0]]
+            x1, y1 = pos[edge[1]]
+            fig.add_trace(go.Scattergl(
+                x=[x0, x1, None],
+                y=[y0, y1, None],
+                line=dict(width=2, color='blue'),
+                hoverinfo='none',
+                mode='lines',
+                showlegend=True
+            ))
+
+        # Update the last clicked node
+        last_clicked_node = clicked_node
+        for trace in fig.data:
+            if trace.name != 'TOGGLE BUTTON':
+                trace.showlegend = False
+                
+       
+    
+
+        
+        
+        return fig
+        
+    
+    
+    
+
+        #fig=current_figure
+
+
+   
+   
+
+    
+    # Existing logic for handling other inputs like dropdowns and clickData
+    # ... (keep your existing code for handling these inputs)
+    
+    # Return the updated figure
+    
+    elif trigger_id == 'knowledge-graph' and clickData:
+        clicked_node = clickData['points'][0]['text']
+
+        # Reset the graph if the same node is clicked again
+        if clicked_node == last_clicked_node:
+            last_clicked_node = None
+            return go.Figure(data=[edge_trace, node_trace], layout=current_figure['layout'])
+
+        # Update the graph based on the clicked node
+        fig = go.Figure(data=[edge_trace, node_trace], layout=current_figure['layout'])
+
+        # Logic for handling click on a node
+        
+        predecessors = list(G.predecessors(clicked_node))
+        successors = list(G.successors(clicked_node))
+        connected_nodes = predecessors + successors
+        connected_edges = [(u, v) for u, v in G.edges() if u == clicked_node or v == clicked_node]
+
+        #connected_nodes = list(G.predecessors(clicked_node)) + list(G.successors(clicked_node))
+        #connected_edges = [(u, v) for u, v in G.edges() if u == clicked_node or v == clicked_node]
+
+    
+        #connected_nodes = list(G.neighbors(clicked_node))
+        #connected_edges = [(u, v) for u, v in G.edges() if u == clicked_node or v == clicked_node]
+
+        if clicked_node in pos:
+            selected_nodes = [clicked_node]
+            x_range, y_range = get_zoom_bounds(selected_nodes, pos, scale=2.5)
+
+            # Update layout to zoom in on the clicked node
+            fig.update_layout(
+                paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                plot_bgcolor='#D3D3D3' , 
+                xaxis=dict(range=x_range, autorange=False),
+                yaxis=dict(range=y_range, autorange=False)
+            )
+        
+        # Highlight the clicked node itself
+        clicked_node_x, clicked_node_y = pos[clicked_node]
+        fig.add_trace(go.Scattergl(
+            x=[clicked_node_x], y=[clicked_node_y],
+            mode='markers+text',
+            marker=dict(size=30, color='orange', line=dict(width=2)),
+            name=clicked_node,
+            text=[clicked_node],
+            hoverinfo='text'
+        ))
+        # Highlight connected nodes
+        for node in connected_nodes:
+            #print("node",node)
+            fig.add_trace(go.Scattergl(
+                x=[pos[node][0]],
+                y=[pos[node][1]],
+                text=[node],
+                mode='markers+text',
+                textposition='bottom center',
+                hoverinfo='text',
+                marker=dict(
+                    size=15,
+                    color='lightblue',
+                    line=dict(width=2)
+                ),
+                showlegend=False
+            ))
+
+        # Highlight connected edges
+        for edge in connected_edges:
+            x0, y0 = pos[edge[0]]
+            x1, y1 = pos[edge[1]]
+            fig.add_trace(go.Scatter(
+                x=[x0, x1, None],
+                y=[y0, y1, None],
+                line=dict(width=2, color='blue'),
+                hoverinfo='none',
+                mode='lines',
+                showlegend=True
+            ))
+
+        # Update the last clicked node
+        last_clicked_node = clicked_node
+        for trace in fig.data:
+            if trace.name != 'TOGGLE BUTTON':
+                trace.showlegend = False
+
+        #print("NNNNCLICKS",n_clicks)
+       
+        
+        return fig
+        
+    
+    
+    
+
+        #fig=current_figure
+
+
+   
+   
+
+    
+    # Existing logic for handling other inputs like dropdowns and clickData
+    # ... (keep your existing code for handling these inputs)
+    
+    # Return the updated figure
+    
+
+    
+    
+    
+    else:
+       
+        
+        if selected_topic in pos:
+            #print("TTTTTTTTTTTTTTTTTTTTTTTT")
+        # Highlight the selected topic node
+           
+            x, y = pos[selected_topic]
+            node_color = get_node_color(selected_topic,selected_nodes1)
+            fig.add_trace(go.Scattergl(
+                x=[x], y=[y],
+                mode='markers+text',
+                marker=dict(size=55,  line=dict(width=2),color=node_color),  # Adjust size and color for emphasis
+                
+                text=[selected_topic],
+                hoverinfo='text',
+                showlegend=True
+            ))
+
+            # Optionally, zoom in on the selected node
+            x_range, y_range = get_zoom_bounds([selected_topic], pos, scale=2.5)
+            
+            fig.update_layout(
+                paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                plot_bgcolor='#D3D3D3' , 
+                xaxis=dict(range=x_range, autorange=False),
+                yaxis=dict(range=y_range, autorange=False)
+            )
+            for trace in fig.data:
+                if trace.name != 'TOGGLE BUTTON':
+                    trace.showlegend = False
+
+
+    #return fig
+    
+        if selected_topic and selected_subtopic:
+            selected_nodes = [n for n in [selected_topic, selected_subtopic] if n]
+    
+            x, y = pos[selected_subtopic]
+            node_color = get_node_color(selected_subtopic,selected_nodes1)
+            fig.add_trace(go.Scattergl(
+                x=[x], y=[y],
+                mode='markers+text',
+                marker=dict(size=40,  line=dict(width=2),color=node_color),  # Adjust size and color for emphasis
+                text=[selected_subtopic],
+                hoverinfo='text',
+                showlegend=True
+            ))
+                
+            if selected_nodes:
+                x_range, y_range = get_zoom_bounds(selected_nodes, pos,scale=2.5)
+                fig.add_trace(go.Scattergl(
+                        x=[pos[selected_topic][0], pos[selected_subtopic][0], None],
+                        y=[pos[selected_topic][1], pos[selected_subtopic][1], None],
+                        line=dict(width=2, color='blue'),
+                    #mode='markers+text',
+                        hoverinfo='none',
+                        mode='lines'
+                    ))
+         
+      
+    #     fig.update_layout(xaxis_range=x_range, yaxis_range=y_range)
+    
+                #print("x_range",x_range)
+                fig.update_layout(
+                    title='<br>Knowledge Graph of Fractions',
+                    title_x=0.5,
+                    showlegend=True,
+                    hovermode='closest',
+                    margin=dict(b=20, l=5, r=5, t=40),
+       
+                    paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                    plot_bgcolor='#D3D3D3' , 
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,range=x_range,autorange=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,range=y_range,autorange=False),
+                    height=500
+                )
+            for trace in fig.data:
+                if trace.name != 'TOGGLE BUTTON':
+                    trace.showlegend = False
+    
+         
+        if (selected_subtopic and selected_objective):
+            #print("selected_objective",selected_objective)
+            selected_nodes = [n for n in [selected_subtopic, selected_objective] if n]
+    
+            x, y = pos[selected_objective]
+            node_color = get_node_color(selected_objective,selected_nodes1)
+            fig.add_trace(go.Scattergl(
+                x=[x], y=[y],
+                mode='markers+text',
+                marker=dict(size=40,  line=dict(width=2),color=node_color),  # Adjust size and color for emphasis
+                text=[selected_objective],
+                hoverinfo='text',
+                showlegend=True
+            ))
+                
+            if selected_nodes:
+                x_range, y_range = get_zoom_bounds(selected_nodes, pos,scale=2.5)
+                fig.add_trace(go.Scattergl(
+                        x=[pos[selected_subtopic][0], pos[selected_objective][0], None],
+                        y=[pos[selected_subtopic][1], pos[selected_objective][1], None],
+                        line=dict(width=2, color='blue'),
+                    #mode='markers+text',
+                        hoverinfo='none',
+                        mode='lines'
+                    ))
+         
+      
+    #     fig.update_layout(xaxis_range=x_range, yaxis_range=y_range)
+    
+                #print("x_range",x_range)
+                fig.update_layout(
+                    title='<br>Knowledge Graph of Fractions',
+                    title_x=0.5,
+                    showlegend=True,
+                    hovermode='closest',
+                    margin=dict(b=20, l=5, r=5, t=40),
+       
+                    paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                    plot_bgcolor='#D3D3D3' , 
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,range=x_range,autorange=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,range=y_range,autorange=False),
+                    height=500
+                )
+            for trace in fig.data:
+                if trace.name != 'TOGGLE BUTTON':
+                    trace.showlegend = False
+        if (selected_objective and selected_learning_objective):
+            
+            selected_nodes = [n for n in [selected_objective, selected_learning_objective] if n]
+    
+            x, y = pos[selected_learning_objective]
+            node_color = get_node_color(selected_learning_objective,selected_nodes1)
+            fig.add_trace(go.Scattergl(
+                x=[x], y=[y],
+                mode='markers+text',
+                marker=dict(size=40, line=dict(width=2),color=node_color),  # Adjust size and color for emphasis
+                text=[selected_learning_objective],
+                hoverinfo='text',
+                showlegend=True
+            ))
+                
+            if selected_nodes:
+                x_range, y_range = get_zoom_bounds(selected_nodes, pos,scale=2.5)
+                fig.add_trace(go.Scattergl(
+                        x=[pos[selected_objective][0], pos[selected_learning_objective][0], None],
+                        y=[pos[selected_objective][1], pos[selected_learning_objective][1], None],
+                        line=dict(width=2, color='blue'),
+                    #mode='markers+text',
+                        hoverinfo='none',
+                        mode='lines'
+                    ))
+         
+      
+    #     fig.update_layout(xaxis_range=x_range, yaxis_range=y_range)
+    
+                #print("x_range",x_range)
+                fig.update_layout(
+                    title='<br>Knowledge Graph of Fractions',
+                    title_x=0.5,
+                    showlegend=True,
+                    hovermode='closest',
+                    margin=dict(b=20, l=5, r=5, t=40),
+       
+                    paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                    plot_bgcolor='#D3D3D3' , 
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,range=x_range,autorange=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,range=y_range,autorange=False),
+                    height=500
+                )
+            for trace in fig.data:
+                if trace.name != 'TOGGLE BUTTON':
+                    trace.showlegend = False
+        if selected_learning_objective and selected_Prerequisites:
+            
+            selected_nodes = [n for n in [selected_learning_objective, selected_Prerequisites] if n]
+    
+            x, y = pos[selected_Prerequisites]
+            node_color = get_node_color(selected_Prerequisites,selected_nodes1)
+            fig.add_trace(go.Scattergl(
+                x=[x], y=[y],
+                mode='markers+text',
+                marker=dict(size=40,  line=dict(width=2),color='#FFCC80'),  # Adjust size and color for emphasis
+                text=[selected_Prerequisites],
+                hoverinfo='text',
+                showlegend=True
+            ))
+                
+            if selected_nodes:
+                x_range, y_range = get_zoom_bounds(selected_nodes, pos,scale=2.5)
+                fig.add_trace(go.Scattergl(
+                        x=[pos[selected_learning_objective][0], pos[selected_Prerequisites][0], None],
+                        y=[pos[selected_learning_objective][1], pos[selected_Prerequisites][1], None],
+                        line=dict(width=2, color='blue'),
+                    #mode='markers+text',
+                        hoverinfo='none',
+                        mode='lines'
+                    ))
+         
+      
+    #     fig.update_layout(xaxis_range=x_range, yaxis_range=y_range)
+    
+                #print("x_range",x_range)
+                fig.update_layout(
+                    title='<br>Knowledge Graph of Fractions',
+                    title_x=0.5,
+                    showlegend=True,
+                    hovermode='closest',
+                    margin=dict(b=20, l=5, r=5, t=40),
+       
+                    paper_bgcolor='#D3D3D3',  # Sets the color of the whole figure background
+                    plot_bgcolor='#D3D3D3' , 
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,range=x_range,autorange=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,range=y_range,autorange=False),
+                    height=500
+                )
+            for trace in fig.data:
+                if trace.name != 'TOGGLE BUTTON':
+                    trace.showlegend = False
+        
+        if selected_Prerequisites:
+        # Clear existing edges
+            #fig.data = [trace for trace in fig.data if trace.mode != 'lines']
+            filtered_ddf = modified_data_ddf[modified_data_ddf['Prerequisites'] == selected_Prerequisites]
+
+        # Compute the first matching row
+            row = filtered_ddf.compute().head(1)
+
+            if not row.empty:
+            # Define the hierarchy
+                hierarchy = [
+                    (row['Prerequisites'].iloc[0], row['MObjectiveName'].iloc[0]),
+                    (row['MObjectiveName'].iloc[0], row['MSubtopic'].iloc[0]),
+                    (row['MSubtopic'].iloc[0], row['MTopic'].iloc[0])
+                ]
+            # Rest of your graph upda
+        # Find the row in DataFrame that matches the selected prerequisite
+
+            # Iterate through all nodes to update their color
+
+
+
+
+
+        # Add edges for the hierarchy
+           # for (child, parent) in hierarchy:
+            #    if pd.notna(child) and pd.notna(parent):
+                    #print("parent",parent)
+             #       x0, y0 = pos[parent]
+              #      x1, y1 = pos[child]
+               #     fig.add_trace(go.Scattergl(
+                #        x=[x0, x1, None], y=[y0, y1, None],
+                 #       mode='lines', line=dict(width=2,color='green'),
+                  #      hoverinfo='none'
+                   # ))
+
+            # Ensure each of these nodes is not None and is in the graph
+            nodes_to_plot = [node for node in [row['Prerequisites'].iloc[0], row['MObjectiveName'].iloc[0], row['MSubtopic'].iloc[0], row['MTopic'].iloc[0]] if pd.notna(node) and node in G]
+
+            #nodes_to_plot = [node for node in [row['Prerequisites'],row['MObjectiveName'], row['MSubtopic'], row['MTopic']] if pd.notna(node) and node in G]
+
+            for node in nodes_to_plot:
+                x, y = pos[node]
+
+
+
+                if node==row['Prerequisites'].iloc[0]:
+                    color,size = '#FFCC80',25
+                if node == row['MObjectiveName'].iloc[0]:
+                    color, size = '#B266B2', 25
+                elif node == row['MSubtopic'].iloc[0]:
+                    color, size = '#66C266', 25
+                elif node == row['MTopic'].iloc[0]:
+                    color, size = '#FF6666', 25
+                else:
+                    continue  # Skip if none of the conditions are met
+
+    # Add trace for the node
+                fig.add_trace(go.Scattergl(
+                    x=[x], y=[y],
+                    mode='markers+text',
+                    marker=dict(size=size, color=color, line=dict(width=2)),
+                    text=[node],
+                    hoverinfo='text'
+                ))
+
+        # Add node markers for the hierarchy
+
+            for (child, parent) in hierarchy:
+                if pd.notna(child) and pd.notna(parent):
+                    #print("parent",parent)
+                    x0, y0 = pos[parent]
+                    x1, y1 = pos[child]
+                    fig.add_trace(go.Scattergl(
+                        x=[x0, x1, None], y=[y0, y1, None],
+                        mode='lines', line=dict(width=2,color='green'),
+                        hoverinfo='none'
+                    ))
+
+            for trace in fig.data:
+                if trace.name != 'TOGGLE BUTTON':
+                    trace.showlegend = False
+
+#        if selected_Prerequisites:
+# Clear existing edges
+            #fig.data = [trace for trace in fig.data if trace.mode != 'lines']
+
+        # Find the row in DataFrame that matches the selected prerequisite
+ #           row = modified_data_df[modified_data_df['Prerequisites'] == selected_Prerequisites].iloc[0]
+#
+        # Define the hierarchy
+  #          hierarchy = [(row['Prerequisites'], row['MObjectiveName']),
+   #             (row['MObjectiveName'], row['MSubtopic']),
+    #                     (row['MSubtopic'], row['MTopic'])]
+
+            # Iterate through all nodes to update their color
+            
+            
+           
+           
+        
+        # Add edges for the hierarchy
+     #       for (child, parent) in hierarchy:
+      #          if pd.notna(child) and pd.notna(parent):
+                    #print("parent",parent)
+       #             x0, y0 = pos[parent]
+        #            x1, y1 = pos[child]
+         #           fig.add_trace(go.Scattergl(
+          #              x=[x0, x1, None], y=[y0, y1, None],
+           #             mode='lines', line=dict(width=2,color='green'), 
+            #            hoverinfo='none'
+             #       ))
+
+            # Ensure each of these nodes is not None and is in the graph
+            #nodes_to_plot = [node for node in [row['Prerequisites'],row['MObjectiveName'], row['MSubtopic'], row['MTopic']] if pd.notna(node) and node in G]
+
+            #for node in nodes_to_plot:
+             #   x, y = pos[node]
+
+    # Set color and size based on node type
+              #  if node==row['Prerequisites']:
+               #     color,size = '#FFCC80',25
+                #if node == row['MObjectiveName']:
+                 #   color, size = '#B266B2', 25
+                #elif node == row['MSubtopic']:
+                 #   color, size = '#66C266', 25
+                #elif node == row['MTopic']:
+                 #   color, size = '#FF6666', 25
+                #else:
+                 #   continue  # Skip if none of the conditions are met
+
+    # Add trace for the node
+               # fig.add_trace(go.Scattergl(
+                #    x=[x], y=[y],
+                 #   mode='markers+text',
+                  #  marker=dict(size=size, color=color, line=dict(width=2)),
+                   # text=[node],
+                   # hoverinfo='text'
+               # ))
+
+        # Add node markers for the hierarchy
+           
+
+                        
+            #for trace in fig.data:
+             #   if trace.name != 'TOGGLE BUTTON':
+              #      trace.showlegend = False
+
+    
+   
+    return fig
+
+        
+        
+
+
+    
+    #return fig
+
+@app.callback(
+    [Output('prerequisites-cell', 'children'),
+     Output('objective-name-cell', 'children'),
+     Output('subtopic-cell', 'children'),
+     Output('topic-cell', 'children')],
+    [Input('selected-Prerequisites-store', 'data')]
+)  
+   
+def update_info_table(stored_Prerequisites_data):
+    selected_Prerequisites = stored_Prerequisites_data.get('Prerequisites') if stored_Prerequisites_data else None
+    
+    if selected_prerequisite:
+        # Initialize variables to store the found data
+        found_prerequisites = selected_prerequisite
+        found_objective_name = ""
+        found_subtopic = ""
+        found_topic = ""
+
+        # Iterate over the DataFrame to find the matching row
+        for _, row in modified_data_df.iterrows():
+            # Check if the current row's 'Prerequisites' match the selected prerequisite
+            if pd.notna(row['Prerequisites']) and row['Prerequisites'] == selected_prerequisite:
+                # Extract the relevant information from 'MObjectiveName', 'MSubtopic', and 'MTopic'
+                found_objective_name = row['MObjectiveName']
+                found_subtopic = row['MSubtopic']
+                found_topic = row['MTopic']
+                break
+
+        # Return the found values to update the table
+        return found_prerequisites, found_objective_name, found_subtopic, found_topic
+
+    # Return empty strings if no prerequisite is selected
+    return "", "", "", ""
+
+
+    
+
+
+
+
+
+  
+# ... [Rest of your Dash app code] ...
+
+if __name__ == '__main__':
+    app.run_server(debug=False, port=3352)
+
+
+
+    
+
+
+
